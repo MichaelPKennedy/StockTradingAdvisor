@@ -91,6 +91,8 @@ export default function PortfolioPerformanceChart({
 
     // Calculate portfolio value over time based on transactions
     const calculatePerformance = () => {
+      const safeInitialBalance = initialBalance || 0;
+
       if (transactions.length === 0) {
         // No transactions yet, just show initial balance
         return {
@@ -98,8 +100,8 @@ export default function PortfolioPerformanceChart({
             {
               date: 'Now',
               fullDate: new Date().toLocaleDateString(),
-              value: initialBalance,
-              displayValue: initialBalance.toFixed(2)
+              value: safeInitialBalance,
+              displayValue: safeInitialBalance.toFixed(2)
             }
           ],
           useTimes: false
@@ -118,7 +120,7 @@ export default function PortfolioPerformanceChart({
       const useTimes = isSameDay(txnDates);
 
       const dataPoints: any[] = [];
-      let runningCash = initialBalance;
+      let runningCash = safeInitialBalance;
       const holdingsMap = new Map<string, { quantity: number; avgPrice: number }>();
 
       // Process each transaction
@@ -186,9 +188,9 @@ export default function PortfolioPerformanceChart({
     setChartData(filteredData);
   }, [initialBalance, currentBalance, holdings, transactions, timeRange]);
 
-  const currentValue = chartData[chartData.length - 1]?.value || initialBalance;
-  const totalChange = currentValue - initialBalance;
-  const totalChangePercent = ((totalChange / initialBalance) * 100);
+  const currentValue = chartData[chartData.length - 1]?.value || initialBalance || 0;
+  const totalChange = currentValue - (initialBalance || 0);
+  const totalChangePercent = initialBalance ? ((totalChange / initialBalance) * 100) : 0;
 
   // Determine if we should skip some dates based on data point count
   const getTickInterval = () => {
