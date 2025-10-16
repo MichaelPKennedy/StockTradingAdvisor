@@ -2,10 +2,13 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { usePortfolio } from '../context/PortfolioContext';
+import StockAutocomplete from '../components/StockAutocomplete';
+import StockDetailModal from '../components/StockDetailModal';
+import PortfolioPerformanceChart from '../components/PortfolioPerformanceChart';
 
 export default function Dashboard() {
   const { user, logout, isAuthenticated } = useAuth();
-  const { portfolio, holdings, createPortfolio, executeTrade, refreshPortfolio, isGuestMode } = usePortfolio();
+  const { portfolio, holdings, transactions, createPortfolio, executeTrade, refreshPortfolio, isGuestMode } = usePortfolio();
   const navigate = useNavigate();
   const [showCreatePortfolio, setShowCreatePortfolio] = useState(false);
   const [showTrade, setShowTrade] = useState(false);
@@ -14,6 +17,7 @@ export default function Dashboard() {
   const [tradeType, setTradeType] = useState<'buy' | 'sell'>('buy');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [selectedStock, setSelectedStock] = useState<string | null>(null);
 
   useEffect(() => {
     if (!portfolio) {
@@ -169,6 +173,15 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {portfolio && (
+              <PortfolioPerformanceChart
+                initialBalance={portfolio.initialBalance}
+                currentBalance={portfolio.currentBalance}
+                holdings={holdings}
+                transactions={transactions}
+              />
+            )}
+
             <div className="bg-white shadow rounded-lg">
               <div className="px-4 py-5 sm:px-6 border-b border-gray-200 flex justify-between items-center">
                 <h3 className="text-lg leading-6 font-medium text-gray-900">Your Holdings</h3>
@@ -183,12 +196,10 @@ export default function Dashboard() {
               {showTrade && (
                 <div className="border-b border-gray-200 bg-gray-50 px-4 py-4">
                   <div className="grid grid-cols-4 gap-4">
-                    <input
-                      type="text"
-                      placeholder="Symbol (e.g., AAPL)"
+                    <StockAutocomplete
                       value={tradeSymbol}
-                      onChange={(e) => setTradeSymbol(e.target.value)}
-                      className="border border-gray-300 rounded-md px-3 py-2"
+                      onChange={setTradeSymbol}
+                      placeholder="Symbol (e.g., AAPL)"
                     />
                     <input
                       type="number"
@@ -237,10 +248,13 @@ export default function Dashboard() {
                           Current Price
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Today's Change
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Total Value
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Gain/Loss
+                          Total Gain/Loss
                         </th>
                       </tr>
                     </thead>
@@ -251,9 +265,16 @@ export default function Dashboard() {
                         const gainLoss = totalValue - totalCost;
                         const gainLossPercent = (gainLoss / totalCost) * 100;
 
+                        // Today's change from the quote data (changePercent)
+                        const todayChange = holding.changePercent || 0;
+
                         return (
-                          <tr key={idx}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <tr
+                            key={idx}
+                            onClick={() => setSelectedStock(holding.symbol)}
+                            className="hover:bg-gray-50 cursor-pointer transition-colors"
+                          >
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 hover:text-blue-800">
                               {holding.symbol}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -264,6 +285,11 @@ export default function Dashboard() {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               ${holding.currentPrice.toFixed(2)}
+                            </td>
+                            <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${
+                              todayChange >= 0 ? 'text-green-600' : 'text-red-600'
+                            }`}>
+                              {todayChange >= 0 ? '+' : ''}{todayChange.toFixed(2)}%
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               ${totalValue.toFixed(2)}
@@ -284,6 +310,13 @@ export default function Dashboard() {
           </>
         )}
       </main>
+
+      {selectedStock && (
+        <StockDetailModal
+          symbol={selectedStock}
+          onClose={() => setSelectedStock(null)}
+        />
+      )}
     </div>
   );
 }

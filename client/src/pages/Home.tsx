@@ -4,16 +4,33 @@ import { useAuth } from '../context/AuthContext';
 import { usePortfolio } from '../context/PortfolioContext';
 import { api } from '../services/api';
 import AIQuestionnaire from '../components/AIQuestionnaire';
+import Toast from '../components/Toast';
 
 export default function Home() {
   const { isAuthenticated } = useAuth();
-  const { createPortfolio, executeTrade } = usePortfolio();
+  const { createPortfolio, batchExecuteTrades } = usePortfolio();
   const navigate = useNavigate();
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
   const [suggestions, setSuggestions] = useState<any>(null);
+  const [selectedStocks, setSelectedStocks] = useState<Set<string>>(new Set());
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const handleSuggestionsComplete = (aiSuggestions: any) => {
     setSuggestions(aiSuggestions);
+    // Select all stocks by default
+    if (aiSuggestions.stocks) {
+      setSelectedStocks(new Set(aiSuggestions.stocks.map((s: any) => s.symbol)));
+    }
+  };
+
+  const toggleStockSelection = (symbol: string) => {
+    const newSelected = new Set(selectedStocks);
+    if (newSelected.has(symbol)) {
+      newSelected.delete(symbol);
+    } else {
+      newSelected.add(symbol);
+    }
+    setSelectedStocks(newSelected);
   };
 
   const handleCreatePortfolio = async () => {
@@ -26,31 +43,104 @@ export default function Home() {
       // Create portfolio for both guests and authenticated users
       await createPortfolio('AI Recommended Portfolio', budget);
 
-      // Execute trades for each recommended stock based on allocation
+      // Prepare trades only for selected stocks
       if (suggestions.stocks && Array.isArray(suggestions.stocks)) {
-        for (const stock of suggestions.stocks) {
-          const allocationAmount = (budget * stock.allocation) / 100;
+        const selectedStocksList = suggestions.stocks.filter((stock: any) =>
+          selectedStocks.has(stock.symbol)
+        );
 
-          // Get current stock price
-          const quote = await api.getQuote(stock.symbol);
-          const quantity = Math.floor(allocationAmount / quote.price);
+        // Recalculate allocations to total 100% for selected stocks only
+        const totalSelectedAllocation = selectedStocksList.reduce(
+          (sum: number, stock: any) => sum + stock.allocation,
+          0
+        );
 
-          if (quantity > 0) {
-            await executeTrade(stock.symbol, quantity, 'buy');
+        const trades = [];
+        const skippedStocks = [];
+
+        for (const stock of selectedStocksList) {
+          try {
+            // Normalize allocation based on selected stocks
+            const normalizedAllocation = (stock.allocation / totalSelectedAllocation) * 100;
+            const allocationAmount = (budget * normalizedAllocation) / 100;
+
+            // Get current stock price
+            const quote = await api.getQuote(stock.symbol);
+            const quantity = Math.floor(allocationAmount / quote.price);
+
+            if (quantity > 0) {
+              trades.push({
+                symbol: stock.symbol,
+                quantity,
+                type: 'buy' as const,
+              });
+            } else {
+              skippedStocks.push(stock.symbol);
+            }
+          } catch (error) {
+            console.error(`Failed to get quote for ${stock.symbol}:`, error);
+            skippedStocks.push(stock.symbol);
           }
+        }
+
+        // Execute all trades in a single batch
+        if (trades.length > 0) {
+          await batchExecuteTrades(trades);
+          setToast({
+            message: `Portfolio created with ${trades.length} stock${trades.length > 1 ? 's' : ''}!`,
+            type: 'success',
+          });
+        }
+
+        if (skippedStocks.length > 0) {
+          setToast({
+            message: `Note: ${skippedStocks.join(', ')} could not be purchased`,
+            type: 'info',
+          });
         }
       }
 
-      // Navigate to dashboard
-      navigate('/dashboard');
+      // Navigate to dashboard after a brief delay to show toast
+      setTimeout(() => navigate('/dashboard'), 1500);
     } catch (error: any) {
       console.error('Error creating portfolio:', error);
-      alert('Failed to create portfolio: ' + error.message);
+      const errorMessage = error.message || 'Failed to create portfolio';
+
+      // Check if it's a rate limit error
+      if (errorMessage.includes('rate limit')) {
+        setToast({
+          message: 'Alpha Vantage API rate limit reached. Please wait a minute and try again.',
+          type: 'error',
+        });
+      } else {
+        setToast({
+          message: errorMessage,
+          type: 'error',
+        });
+      }
     }
+  };
+
+  const handleSkipToManualPortfolio = () => {
+    // Create empty portfolio and go to dashboard for manual trading
+    const budget = parseFloat(suggestions?.budget || '100000');
+    createPortfolio('My Portfolio', budget)
+      .then(() => navigate('/dashboard'))
+      .catch((error) => {
+        console.error('Error creating portfolio:', error);
+        alert('Failed to create portfolio: ' + error.message);
+      });
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
       <nav className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
@@ -127,43 +217,80 @@ export default function Home() {
         {suggestions && (
           <div className="max-w-4xl mx-auto">
             <div className="bg-white rounded-lg shadow-lg p-8">
-              <h3 className="text-2xl font-bold text-gray-900 mb-4">Your AI-Recommended Portfolio</h3>
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">Your AI-Recommended Portfolio</h3>
               <p className="text-gray-600 mb-6">{suggestions.overall_strategy}</p>
 
-              <div className="space-y-4 mb-8">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <p className="text-sm text-blue-900 font-medium">
+                  Select which stocks you'd like to include in your portfolio, or skip to create your own manually.
+                </p>
+              </div>
+
+              <div className="space-y-3 mb-8">
                 {suggestions.stocks?.map((stock: any, idx: number) => (
-                  <div key={idx} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex justify-between items-start">
+                  <div
+                    key={idx}
+                    className={`border-2 rounded-lg p-4 transition-all cursor-pointer ${
+                      selectedStocks.has(stock.symbol)
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                    onClick={() => toggleStockSelection(stock.symbol)}
+                  >
+                    <div className="flex items-start space-x-4">
+                      <div className="flex items-center pt-1">
+                        <input
+                          type="checkbox"
+                          checked={selectedStocks.has(stock.symbol)}
+                          onChange={() => toggleStockSelection(stock.symbol)}
+                          className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </div>
                       <div className="flex-1">
                         <div className="flex items-center space-x-2 mb-2">
                           <span className="text-lg font-bold text-gray-900">{stock.symbol}</span>
                           <span className="text-gray-600">-</span>
                           <span className="text-gray-700">{stock.name}</span>
                         </div>
-                        <p className="text-sm text-gray-600 mb-2">{stock.reasoning}</p>
+                        <p className="text-sm text-gray-600">{stock.reasoning}</p>
                       </div>
-                      <div className="ml-4 text-right">
+                      <div className="text-right">
                         <div className="text-2xl font-bold text-blue-600">{stock.allocation}%</div>
-                        <div className="text-sm text-gray-500">Allocation</div>
+                        <div className="text-xs text-gray-500">Suggested</div>
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div className="flex space-x-4">
+              {selectedStocks.size === 0 && (
+                <div className="mb-4 bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded">
+                  Please select at least one stock or skip to create a manual portfolio.
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <button
                   onClick={handleCreatePortfolio}
-                  className="flex-1 bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 font-medium"
+                  disabled={selectedStocks.size === 0}
+                  className="bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Create Portfolio & Start Trading
+                  Create with Selected ({selectedStocks.size})
+                </button>
+                <button
+                  onClick={handleSkipToManualPortfolio}
+                  className="bg-gray-600 text-white py-3 px-6 rounded-lg hover:bg-gray-700 font-medium"
+                >
+                  Skip & Build Manually
                 </button>
                 <button
                   onClick={() => {
                     setSuggestions(null);
                     setShowQuestionnaire(false);
+                    setSelectedStocks(new Set());
                   }}
-                  className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  className="px-6 py-3 border-2 border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
                 >
                   Start Over
                 </button>

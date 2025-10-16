@@ -9,6 +9,7 @@ interface Holding {
   quantity: number;
   purchasePrice: number;
   currentPrice: number;
+  changePercent?: number;
   purchaseDate?: string;
 }
 
@@ -36,6 +37,7 @@ interface PortfolioContextType {
   isGuestMode: boolean;
   createPortfolio: (name: string, initialBalance: number) => Promise<void>;
   executeTrade: (symbol: string, quantity: number, type: 'buy' | 'sell') => Promise<void>;
+  batchExecuteTrades: (trades: Array<{ symbol: string; quantity: number; type: 'buy' | 'sell' }>) => Promise<void>;
   migrateToAccount: () => Promise<void>;
   refreshPortfolio: () => Promise<void>;
 }
@@ -161,6 +163,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
             quantity,
             purchasePrice: price,
             currentPrice: price,
+            changePercent: quote.changePercent || 0,
             purchaseDate: new Date().toISOString(),
           });
         }
@@ -190,6 +193,101 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
       const updatedTransactions = [newTransaction, ...transactions];
 
+      setPortfolio(updatedPortfolio);
+      setHoldings(updatedHoldings);
+      setTransactions(updatedTransactions);
+      saveGuestPortfolio(updatedPortfolio, updatedHoldings, updatedTransactions);
+    }
+  };
+
+  const batchExecuteTrades = async (trades: Array<{ symbol: string; quantity: number; type: 'buy' | 'sell' }>) => {
+    if (!portfolio) throw new Error('No portfolio found');
+
+    if (isAuthenticated && token) {
+      // Execute authenticated trades sequentially
+      for (const trade of trades) {
+        try {
+          await api.executeTrade(trade, token);
+        } catch (error) {
+          console.error(`Failed to execute trade for ${trade.symbol}:`, error);
+          // Continue with other trades even if one fails
+        }
+      }
+      await refreshPortfolio();
+    } else {
+      // Execute all guest trades in a single state update
+      let updatedPortfolio = { ...portfolio };
+      let updatedHoldings = [...holdings];
+      const newTransactions: Transaction[] = [];
+
+      // Process all trades
+      for (const trade of trades) {
+        const { symbol, quantity, type } = trade;
+
+        try {
+          const quote = await api.getQuote(symbol);
+          const price = quote.price;
+          const totalCost = price * quantity;
+
+          if (type === 'buy') {
+            // Skip if insufficient balance, but continue with other trades
+            if (updatedPortfolio.currentBalance < totalCost) {
+              console.warn(`Insufficient balance for ${symbol}, skipping...`);
+              continue;
+            }
+
+            updatedPortfolio.currentBalance -= totalCost;
+
+            const existingHolding = updatedHoldings.find(h => h.symbol === symbol);
+            if (existingHolding) {
+              const newQuantity = existingHolding.quantity + quantity;
+              const avgPrice = ((existingHolding.purchasePrice * existingHolding.quantity) + (price * quantity)) / newQuantity;
+              existingHolding.quantity = newQuantity;
+              existingHolding.purchasePrice = avgPrice;
+              existingHolding.currentPrice = price;
+            } else {
+              updatedHoldings.push({
+                symbol,
+                quantity,
+                purchasePrice: price,
+                currentPrice: price,
+                changePercent: quote.changePercent || 0,
+                purchaseDate: new Date().toISOString(),
+              });
+            }
+          } else {
+            const holding = updatedHoldings.find(h => h.symbol === symbol);
+            if (!holding || holding.quantity < quantity) {
+              console.warn(`Insufficient shares to sell for ${symbol}, skipping...`);
+              continue;
+            }
+
+            updatedPortfolio.currentBalance += totalCost;
+
+            if (holding.quantity === quantity) {
+              updatedHoldings = updatedHoldings.filter(h => h.symbol !== symbol);
+            } else {
+              holding.quantity -= quantity;
+              holding.currentPrice = price;
+            }
+          }
+
+          newTransactions.push({
+            type,
+            symbol,
+            quantity,
+            price,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.error(`Failed to process trade for ${symbol}:`, error);
+          // Continue with other trades
+        }
+      }
+
+      const updatedTransactions = [...newTransactions, ...transactions];
+
+      // Single state update for all trades
       setPortfolio(updatedPortfolio);
       setHoldings(updatedHoldings);
       setTransactions(updatedTransactions);
@@ -249,6 +347,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         isGuestMode,
         createPortfolio,
         executeTrade,
+        batchExecuteTrades,
         migrateToAccount,
         refreshPortfolio,
       }}

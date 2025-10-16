@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getQuote, searchSymbol, getCompanyOverview, getCacheStats } from '../controllers/stockController';
+import { getQuote, searchSymbol, getCompanyOverview, getCacheStats, getHistoricalData } from '../controllers/stockController';
 
 const router = Router();
 
@@ -7,6 +7,7 @@ const router = Router();
 router.get('/quote/:symbol', getQuote);
 router.get('/search', searchSymbol);
 router.get('/overview/:symbol', getCompanyOverview);
+router.get('/historical/:symbol', getHistoricalData);
 router.get('/cache-stats', getCacheStats);
 
 export default router;

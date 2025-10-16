@@ -80,6 +80,9 @@ export const api = {
   getCompanyOverview: (symbol: string) =>
     request<any>(`/stocks/overview/${symbol}`),
 
+  getHistoricalData: (symbol: string, period: 'daily' | 'weekly' | 'monthly' = 'daily') =>
+    request<any[]>(`/stocks/historical/${symbol}?period=${period}`),
+
   // Portfolio
   getPortfolio: (token: string) =>
     request<{ portfolio: any; holdings: any[] }>('/portfolio', { token }),
