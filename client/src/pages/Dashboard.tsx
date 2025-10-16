@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { usePortfolio } from '../context/PortfolioContext';
 import StockAutocomplete from '../components/StockAutocomplete';
@@ -9,7 +9,6 @@ import PortfolioPerformanceChart from '../components/PortfolioPerformanceChart';
 export default function Dashboard() {
   const { user, logout, isAuthenticated } = useAuth();
   const { portfolio, holdings, transactions, createPortfolio, executeTrade, refreshPortfolio, isGuestMode } = usePortfolio();
-  const navigate = useNavigate();
   const [showCreatePortfolio, setShowCreatePortfolio] = useState(false);
   const [showTrade, setShowTrade] = useState(false);
   const [tradeSymbol, setTradeSymbol] = useState('');
