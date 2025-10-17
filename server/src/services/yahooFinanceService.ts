@@ -1,4 +1,5 @@
-import YahooFinance from 'yahoo-finance2';
+// @ts-ignore
+import YahooFinance from "yahoo-finance2";
 
 interface HistoricalDataPoint {
   date: string;
@@ -10,6 +11,7 @@ interface HistoricalDataPoint {
 }
 
 class YahooFinanceService {
+  // @ts-ignore
   private yf: YahooFinance;
 
   constructor() {
@@ -27,15 +29,17 @@ class YahooFinanceService {
     symbol: string,
     period1: Date,
     period2: Date,
-    interval: '1d' | '1wk' | '1mo' = '1d'
+    interval: "1d" | "1wk" | "1mo" = "1d"
   ): Promise<HistoricalDataPoint[]> {
     try {
-      console.log(`🔍 Fetching historical data for ${symbol} from Yahoo Finance`);
+      console.log(
+        `🔍 Fetching historical data for ${symbol} from Yahoo Finance`
+      );
 
       const queryOptions = {
         period1,
         period2,
-        interval
+        interval,
       };
 
       const result: any = await this.yf.historical(symbol, queryOptions);
@@ -45,7 +49,7 @@ class YahooFinanceService {
       }
 
       const historicalData = result.map((item: any) => ({
-        date: new Date(item.date).toISOString().split('T')[0], // Format as YYYY-MM-DD
+        date: new Date(item.date).toISOString().split("T")[0], // Format as YYYY-MM-DD
         open: item.open || 0,
         high: item.high || 0,
         low: item.low || 0,
@@ -67,21 +71,22 @@ class YahooFinanceService {
    */
   async getHistoricalDataByPeriod(
     symbol: string,
-    period: 'daily' | 'weekly' | 'monthly' = 'daily'
+    period: "daily" | "weekly" | "monthly" = "daily"
   ): Promise<HistoricalDataPoint[]> {
     const period2 = new Date(); // End date is today
     const period1 = new Date();
 
     // Default to 2 years of data for daily, more for weekly/monthly
-    if (period === 'daily') {
+    if (period === "daily") {
       period1.setFullYear(period1.getFullYear() - 2);
-    } else if (period === 'weekly') {
+    } else if (period === "weekly") {
       period1.setFullYear(period1.getFullYear() - 5);
     } else {
       period1.setFullYear(period1.getFullYear() - 10);
     }
 
-    const interval = period === 'daily' ? '1d' : period === 'weekly' ? '1wk' : '1mo';
+    const interval =
+      period === "daily" ? "1d" : period === "weekly" ? "1wk" : "1mo";
 
     return this.getHistoricalData(symbol, period1, period2, interval);
   }
@@ -110,7 +115,7 @@ class YahooFinanceService {
         open: result.regularMarketOpen || 0,
         dayHigh: result.regularMarketDayHigh || 0,
         dayLow: result.regularMarketDayLow || 0,
-        timestamp: result.regularMarketTime || new Date()
+        timestamp: result.regularMarketTime || new Date(),
       };
     } catch (error) {
       console.error(`Error fetching quote for ${symbol}:`, error);
@@ -133,13 +138,13 @@ class YahooFinanceService {
       }
 
       return result.quotes
-        .filter((item: any) => item.quoteType === 'EQUITY')
+        .filter((item: any) => item.quoteType === "EQUITY")
         .slice(0, 10)
         .map((item: any) => ({
           symbol: item.symbol,
           name: item.longname || item.shortname || item.symbol,
           type: item.quoteType,
-          exchange: item.exchange || ''
+          exchange: item.exchange || "",
         }));
     } catch (error) {
       console.error(`Error searching for ${query}:`, error);
@@ -153,10 +158,12 @@ class YahooFinanceService {
    */
   async getCompanyOverview(symbol: string) {
     try {
-      console.log(`🔍 Fetching company overview for ${symbol} from Yahoo Finance`);
+      console.log(
+        `🔍 Fetching company overview for ${symbol} from Yahoo Finance`
+      );
 
       const result: any = await this.yf.quoteSummary(symbol, {
-        modules: ['assetProfile', 'summaryDetail', 'price']
+        modules: ["assetProfile", "summaryDetail", "price"],
       });
 
       const profile = result.assetProfile || {};
@@ -166,15 +173,15 @@ class YahooFinanceService {
       return {
         symbol: priceData.symbol || symbol,
         name: priceData.longName || priceData.shortName || symbol,
-        description: profile.longBusinessSummary || '',
-        sector: profile.sector || '',
-        industry: profile.industry || '',
-        website: profile.website || '',
+        description: profile.longBusinessSummary || "",
+        sector: profile.sector || "",
+        industry: profile.industry || "",
+        website: profile.website || "",
         employees: profile.fullTimeEmployees || 0,
         marketCap: details.marketCap || 0,
         peRatio: details.trailingPE || 0,
         dividendYield: details.dividendYield || 0,
-        beta: details.beta || 0
+        beta: details.beta || 0,
       };
     } catch (error) {
       console.error(`Error fetching company overview for ${symbol}:`, error);
@@ -196,16 +203,23 @@ class YahooFinanceService {
       const period2 = new Date(date);
       period2.setDate(period2.getDate() + 1);
 
-      const data = await this.getHistoricalData(symbol, period1, period2, '1d');
+      const data = await this.getHistoricalData(symbol, period1, period2, "1d");
 
       if (data.length === 0) {
-        throw new Error(`No historical data found for ${symbol} on ${date.toISOString().split('T')[0]}`);
+        throw new Error(
+          `No historical data found for ${symbol} on ${
+            date.toISOString().split("T")[0]
+          }`
+        );
       }
 
       // Return the close price of the closest date
       return data[0].close;
     } catch (error) {
-      console.error(`Error fetching historical price for ${symbol} on ${date}:`, error);
+      console.error(
+        `Error fetching historical price for ${symbol} on ${date}:`,
+        error
+      );
       throw error;
     }
   }
@@ -221,15 +235,22 @@ class YahooFinanceService {
     symbols: string[],
     period1: Date,
     period2: Date,
-    interval: '1d' | '1wk' | '1mo' = '1d'
+    interval: "1d" | "1wk" | "1mo" = "1d"
   ): Promise<Map<string, HistoricalDataPoint[]>> {
     try {
-      console.log(`🔍 Fetching bulk historical data for ${symbols.length} symbols`);
+      console.log(
+        `🔍 Fetching bulk historical data for ${symbols.length} symbols`
+      );
 
       const results = await Promise.all(
         symbols.map(async (symbol) => {
           try {
-            const data = await this.getHistoricalData(symbol, period1, period2, interval);
+            const data = await this.getHistoricalData(
+              symbol,
+              period1,
+              period2,
+              interval
+            );
             return { symbol, data };
           } catch (error) {
             console.error(`Error fetching data for ${symbol}:`, error);
@@ -245,7 +266,7 @@ class YahooFinanceService {
 
       return dataMap;
     } catch (error) {
-      console.error('Error fetching bulk historical data:', error);
+      console.error("Error fetching bulk historical data:", error);
       throw error;
     }
   }
