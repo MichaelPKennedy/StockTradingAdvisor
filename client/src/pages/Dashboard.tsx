@@ -8,7 +8,7 @@ import PortfolioPerformanceChart from '../components/PortfolioPerformanceChart';
 
 export default function Dashboard() {
   const { user, logout, isAuthenticated } = useAuth();
-  const { portfolio, holdings, transactions, createPortfolio, executeTrade, refreshPortfolio, isGuestMode } = usePortfolio();
+  const { portfolio, holdings, transactions, createPortfolio, executeTrade, refreshPortfolio, isGuestMode, loading } = usePortfolio();
   const [showCreatePortfolio, setShowCreatePortfolio] = useState(false);
   const [showTrade, setShowTrade] = useState(false);
   const [tradeSymbol, setTradeSymbol] = useState('');
@@ -19,10 +19,13 @@ export default function Dashboard() {
   const [selectedStock, setSelectedStock] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!portfolio) {
+    // Only show create portfolio dialog if not loading and no portfolio exists
+    if (!loading && !portfolio) {
       setShowCreatePortfolio(true);
+    } else if (portfolio) {
+      setShowCreatePortfolio(false);
     }
-  }, [portfolio]);
+  }, [portfolio, loading]);
 
   const handleCreatePortfolio = async () => {
     try {
@@ -97,7 +100,35 @@ export default function Dashboard() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {isGuestMode && (
+        {loading && (
+          <div className="flex items-center justify-center min-h-[400px]">
+            <div className="text-center">
+              <svg
+                className="animate-spin h-12 w-12 text-blue-600 mx-auto mb-4"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+              <p className="text-gray-600">Loading portfolio...</p>
+            </div>
+          </div>
+        )}
+
+        {!loading && isGuestMode && (
           <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
@@ -119,18 +150,18 @@ export default function Dashboard() {
           </div>
         )}
 
-        {error && (
+        {!loading && error && (
           <div className="mb-4 bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded">
             {error}
           </div>
         )}
-        {success && (
+        {!loading && success && (
           <div className="mb-4 bg-green-50 border border-green-400 text-green-700 px-4 py-3 rounded">
             {success}
           </div>
         )}
 
-        {showCreatePortfolio ? (
+        {!loading && showCreatePortfolio ? (
           <div className="bg-white shadow sm:rounded-lg p-6 max-w-md mx-auto mt-20">
             <h2 className="text-2xl font-bold text-gray-900 mb-4">Create Your Portfolio</h2>
             <p className="text-gray-600 mb-6">
@@ -143,7 +174,7 @@ export default function Dashboard() {
               Create Portfolio
             </button>
           </div>
-        ) : (
+        ) : !loading ? (
           <>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-3 mb-8">
               <div className="bg-white overflow-hidden shadow rounded-lg">
@@ -307,7 +338,7 @@ export default function Dashboard() {
               </div>
             </div>
           </>
-        )}
+        ) : null}
       </main>
 
       {selectedStock && (

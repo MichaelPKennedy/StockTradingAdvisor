@@ -8,7 +8,7 @@ An AI-powered paper trading platform that helps users learn about stock investin
 - **Paper Trading**: Practice trading with virtual money (no real money involved)
 - **Guest Mode**: Try the platform without creating an account
 - **Portfolio Management**: Track your virtual stocks and performance
-- **Real-time Stock Data**: 15-minute delayed quotes from Alpha Vantage API
+- **Stock Data**: Real-time quotes and unlimited historical data from Yahoo Finance (no API key required!)
 - **Account Creation**: Save your portfolio by creating an account when ready
 
 ## Tech Stack
@@ -26,7 +26,7 @@ An AI-powered paper trading platform that helps users learn about stock investin
 - MySQL database
 - JWT authentication
 - OpenAI GPT-4o-mini for AI advisor
-- Alpha Vantage API for stock data
+- Yahoo Finance (via yahoo-finance2) - unlimited, free, no API key needed!
 
 ### Project Structure
 ```
@@ -41,8 +41,8 @@ stock-trading-advisor/
 ### Prerequisites
 - Node.js 18+
 - MySQL 8+
-- Alpha Vantage API key (free tier: https://www.alphavantage.co/support/#api-key)
 - OpenAI API key (https://platform.openai.com/api-keys)
+- No stock API key needed - uses Yahoo Finance!
 
 ### Database Setup
 
@@ -81,8 +81,7 @@ DB_USER=root
 DB_PASSWORD=your_password
 DB_NAME=stock_trading_advisor
 JWT_SECRET=your_secret_key
-ALPHA_VANTAGE_API_KEY=your_api_key
-OPENAI_API_KEY=your_api_key
+OPENAI_API_KEY=your_openai_api_key
 ```
 
 5. Start development server:
@@ -120,12 +119,17 @@ Frontend will run on http://localhost:5173
 3. **Migration**: Portfolio data migrates from LocalStorage to MySQL database
 4. **Authenticated Mode**: User can now access portfolio across devices
 
-### API Caching Strategy
+### API Strategy
 
-**Alpha Vantage**:
-- Free tier: 25 API calls/day
-- Cache: 15-minute in-memory cache per stock symbol
-- Sufficient for 1-2 concurrent users
+**Yahoo Finance** (via yahoo-finance2 package):
+- ✅ Completely FREE
+- ✅ No API key required
+- ✅ Unlimited calls
+- ✅ No rate limiting
+- Real-time stock quotes (15-20 min delay)
+- Historical price data
+- Company information
+- Symbol search
 
 **OpenAI**:
 - Using GPT-4o-mini for cost efficiency

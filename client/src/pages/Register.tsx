@@ -30,11 +30,20 @@ export default function Register() {
     setLoading(true);
 
     try {
+      // Check if migration is needed before registering
+      const hasGuestData = isGuestMode;
+
       await register(email, password);
 
-      // If user has guest portfolio, migrate it
-      if (isGuestMode) {
-        await migrateToAccount();
+      // If user had guest portfolio, migrate it after registration
+      if (hasGuestData) {
+        try {
+          await migrateToAccount();
+        } catch (migrationError) {
+          console.error('Migration failed:', migrationError);
+          // Don't fail the registration if migration fails
+          setError('Account created but failed to migrate guest portfolio. You can start fresh.');
+        }
       }
 
       navigate('/dashboard');

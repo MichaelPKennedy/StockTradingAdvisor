@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
-import finnhubService from '../services/finnhubService';
-import alphaVantageService from '../services/alphaVantageService';
+import yahooFinanceService from '../services/yahooFinanceService';
 
 export const getQuote = async (req: Request, res: Response): Promise<void> => {
   const { symbol } = req.params;
@@ -11,7 +10,7 @@ export const getQuote = async (req: Request, res: Response): Promise<void> => {
   }
 
   try {
-    const quote = await finnhubService.getQuote(symbol.toUpperCase());
+    const quote = await yahooFinanceService.getQuote(symbol.toUpperCase());
     res.json(quote);
   } catch (error) {
     console.error('Get quote error:', error);
@@ -28,7 +27,7 @@ export const searchSymbol = async (req: Request, res: Response): Promise<void> =
   }
 
   try {
-    const results = await finnhubService.searchSymbol(q);
+    const results = await yahooFinanceService.searchSymbol(q);
     res.json(results);
   } catch (error) {
     console.error('Search symbol error:', error);
@@ -45,21 +44,11 @@ export const getCompanyOverview = async (req: Request, res: Response): Promise<v
   }
 
   try {
-    const overview = await finnhubService.getCompanyOverview(symbol.toUpperCase());
+    const overview = await yahooFinanceService.getCompanyOverview(symbol.toUpperCase());
     res.json(overview);
   } catch (error) {
     console.error('Get company overview error:', error);
     res.status(500).json({ error: 'Failed to fetch company overview' });
-  }
-};
-
-export const getCacheStats = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const stats = finnhubService.getCacheStats();
-    res.json(stats);
-  } catch (error) {
-    console.error('Get cache stats error:', error);
-    res.status(500).json({ error: 'Failed to get cache stats' });
   }
 };
 
@@ -77,8 +66,8 @@ export const getHistoricalData = async (req: Request, res: Response): Promise<vo
     : 'daily';
 
   try {
-    // Use Alpha Vantage for historical data (Finnhub requires paid plan)
-    const historicalData = await alphaVantageService.getHistoricalData(symbol.toUpperCase(), validPeriod);
+    // Use Yahoo Finance for historical data (free, no rate limits)
+    const historicalData = await yahooFinanceService.getHistoricalDataByPeriod(symbol.toUpperCase(), validPeriod);
     res.json(historicalData);
   } catch (error) {
     console.error('Get historical data error:', error);

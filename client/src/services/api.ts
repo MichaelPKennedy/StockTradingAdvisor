@@ -110,4 +110,7 @@ export const api = {
 
   getTransactions: (token: string) =>
     request<any[]>('/portfolio/transactions', { token }),
+
+  getPortfolioPerformance: (token: string) =>
+    request<Array<{ date: string; value: number }>>('/portfolio/performance', { token }),
 };

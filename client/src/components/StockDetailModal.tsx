@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { api } from '../services/api';
 
 interface StockDetailModalProps {
@@ -9,19 +9,85 @@ interface StockDetailModalProps {
 
 export default function StockDetailModal({ symbol, onClose }: StockDetailModalProps) {
   const [historicalData, setHistoricalData] = useState<any[]>([]);
-  const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [period, setPeriod] = useState<'1W' | '1M' | '3M' | '1Y' | 'Max'>('1M');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Determine tick interval based on data point count
+  const getTickInterval = () => {
+    if (historicalData.length <= 5) return 0; // Show all
+    if (historicalData.length <= 10) return 1; // Skip every other
+    if (historicalData.length <= 20) return 2; // Skip 2
+    return Math.floor(historicalData.length / 6); // Show ~6 dates
+  };
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       setError('');
       try {
-        const data = await api.getHistoricalData(symbol, period);
-        // Limit to last 30 data points for better visualization
-        const limitedData = data.slice(-30);
-        setHistoricalData(limitedData);
+        // Determine which API period to use based on time range
+        let apiPeriod: 'daily' | 'weekly' | 'monthly' = 'daily';
+        let dataPoints = 100;
+
+        if (period === '1W') {
+          apiPeriod = 'daily';
+          dataPoints = 7; // 1 week of daily data
+        } else if (period === '1M') {
+          apiPeriod = 'daily';
+          dataPoints = 30; // 1 month of daily data
+        } else if (period === '3M') {
+          apiPeriod = 'daily';
+          dataPoints = 90; // 3 months of daily data
+        } else if (period === '1Y') {
+          apiPeriod = 'weekly';
+          dataPoints = 52; // 1 year of weekly data
+        } else if (period === 'Max') {
+          apiPeriod = 'monthly';
+          dataPoints = 100; // All available monthly data
+        }
+
+        const data = await api.getHistoricalData(symbol, apiPeriod);
+        const limitedData = data.slice(-dataPoints);
+
+        // Format dates based on the API period
+        const formattedData = limitedData.map((point: any) => {
+          const date = new Date(point.date);
+          let formattedDate = point.date;
+
+          if (apiPeriod === 'daily') {
+            // Show month and day for daily (e.g., "Jan 15")
+            formattedDate = date.toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric'
+            });
+          } else if (apiPeriod === 'weekly') {
+            // Show month and day for weekly (e.g., "Jan 15")
+            formattedDate = date.toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric'
+            });
+          } else if (apiPeriod === 'monthly') {
+            // Show month and year for monthly (e.g., "Jan 2024")
+            formattedDate = date.toLocaleDateString('en-US', {
+              month: 'short',
+              year: 'numeric'
+            });
+          }
+
+          return {
+            ...point,
+            date: formattedDate,
+            fullDate: date.toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })
+          };
+        });
+
+        setHistoricalData(formattedData);
       } catch (err: any) {
         const errorMessage = err.message || 'Failed to load chart data';
         if (errorMessage.includes('limit') || errorMessage.includes('rate')) {
@@ -52,37 +118,20 @@ export default function StockDetailModal({ symbol, onClose }: StockDetailModalPr
             </button>
           </div>
 
-          <div className="mb-4 flex space-x-2">
-            <button
-              onClick={() => setPeriod('daily')}
-              className={`px-4 py-2 rounded ${
-                period === 'daily'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              Daily
-            </button>
-            <button
-              onClick={() => setPeriod('weekly')}
-              className={`px-4 py-2 rounded ${
-                period === 'weekly'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              Weekly
-            </button>
-            <button
-              onClick={() => setPeriod('monthly')}
-              className={`px-4 py-2 rounded ${
-                period === 'monthly'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              Monthly
-            </button>
+          <div className="mb-4 flex space-x-1">
+            {(['1W', '1M', '3M', '1Y', 'Max'] as const).map((range) => (
+              <button
+                key={range}
+                onClick={() => setPeriod(range)}
+                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                  period === range
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                {range}
+              </button>
+            ))}
           </div>
 
           {loading && (
@@ -119,32 +168,53 @@ export default function StockDetailModal({ symbol, onClose }: StockDetailModalPr
           {!loading && !error && historicalData.length > 0 && (
             <div className="h-96">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={historicalData}>
-                  <CartesianGrid strokeDasharray="3 3" />
+                <AreaChart data={historicalData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorStockPrice" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
                   <XAxis
                     dataKey="date"
-                    tick={{ fontSize: 12 }}
-                    angle={-45}
-                    textAnchor="end"
-                    height={80}
+                    tick={{ fontSize: 11, fill: '#6b7280' }}
+                    tickLine={false}
+                    axisLine={false}
+                    interval={getTickInterval()}
+                    height={30}
                   />
                   <YAxis
                     domain={['auto', 'auto']}
-                    tick={{ fontSize: 12 }}
-                    tickFormatter={(value) => `$${value.toFixed(2)}`}
+                    tick={{ fontSize: 11, fill: '#6b7280' }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value) => `$${value.toFixed(0)}`}
+                    width={60}
                   />
                   <Tooltip
-                    formatter={(value: any) => [`$${value.toFixed(2)}`, 'Close']}
-                    labelStyle={{ color: '#000' }}
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div className="bg-gray-900 text-white px-3 py-2 rounded shadow-lg text-sm">
+                            <div className="font-semibold">${payload[0].value?.toFixed(2)}</div>
+                            <div className="text-xs text-gray-300">{payload[0].payload.date}</div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                    cursor={{ stroke: '#9ca3af', strokeWidth: 1, strokeDasharray: '3 3' }}
                   />
-                  <Line
+                  <Area
                     type="monotone"
                     dataKey="close"
                     stroke="#2563eb"
                     strokeWidth={2}
+                    fill="url(#colorStockPrice)"
                     dot={false}
+                    activeDot={{ r: 4, fill: "#2563eb" }}
                   />
-                </LineChart>
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           )}

@@ -1,5 +1,7 @@
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { useEffect, useState } from 'react';
+import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 interface PortfolioPerformanceChartProps {
   initialBalance: number;
@@ -26,67 +28,150 @@ export default function PortfolioPerformanceChart({
   holdings,
   transactions
 }: PortfolioPerformanceChartProps) {
+  const { token, isAuthenticated } = useAuth();
   const [chartData, setChartData] = useState<any[]>([]);
-  const [timeRange, setTimeRange] = useState<'1D' | '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y' | 'Max'>('Max');
+  const [timeRange, setTimeRange] = useState<'5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y' | 'Max'>('Max');
 
   useEffect(() => {
+    const fetchHistoricalData = async () => {
+      if (isAuthenticated && token && transactions.length > 0) {
+        try {
+          const performanceData = await api.getPortfolioPerformance(token);
+
+          // Filter by time range FIRST
+          const filtered = filterDataByTimeRange(performanceData.map((point: any) => {
+            const date = new Date(point.date);
+            return {
+              timestamp: date.getTime(),
+              value: point.value,
+              displayValue: point.value.toFixed(2),
+              rawDate: point.date
+            };
+          }), timeRange);
+
+          // Then format based on the CURRENT timeRange
+          const formattedData = filtered.map((point: any) => {
+            const date = new Date(point.rawDate);
+            const now = new Date();
+
+            let formattedDate: string;
+            // Format based on current timeRange, not data span
+            if (timeRange === '5D' || timeRange === '1M') {
+              // Show "May 1" format (no year) for 5D and 1M
+              const month = date.toLocaleDateString('en-US', { month: 'short' });
+              const day = date.getDate();
+              formattedDate = `${month} ${day}`;
+            } else {
+              // For 6M, YTD, 1Y, 5Y, Max - always show year
+              const firstDate = new Date(filtered[0].rawDate);
+              const yearsDiff = (now.getTime() - firstDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+
+              if (yearsDiff > 3) {
+                // Show just year for 3+ year spans
+                formattedDate = date.getFullYear().toString();
+              } else {
+                // Always show "May 2025" format for 6M+
+                formattedDate = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+              }
+            }
+
+            return {
+              date: formattedDate,
+              fullDate: date.toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              }),
+              timestamp: point.timestamp,
+              value: point.value,
+              displayValue: point.displayValue
+            };
+          });
+
+          setChartData(formattedData);
+          return;
+        } catch (error) {
+          console.error('Failed to fetch historical performance data:', error);
+          // Fall through to guest mode calculation
+        }
+      }
+
+      // Guest mode or fallback: use transaction-based calculation
+      calculateGuestModePerformance();
+    };
+
+    fetchHistoricalData();
+  }, [isAuthenticated, token, initialBalance, currentBalance, JSON.stringify(holdings), JSON.stringify(transactions), timeRange]);
+
+  // Filter data based on time range
+  const filterDataByTimeRange = (data: any[], range: typeof timeRange) => {
+    if (range === 'Max' || data.length === 0) return data;
+
+    const now = new Date();
+    const cutoffDate = new Date();
+
+    switch (range) {
+      case '5D':
+        cutoffDate.setDate(now.getDate() - 5);
+        break;
+      case '1M':
+        cutoffDate.setMonth(now.getMonth() - 1);
+        break;
+      case '6M':
+        cutoffDate.setMonth(now.getMonth() - 6);
+        break;
+      case 'YTD':
+        cutoffDate.setMonth(0);
+        cutoffDate.setDate(1);
+        break;
+      case '1Y':
+        cutoffDate.setFullYear(now.getFullYear() - 1);
+        break;
+      case '5Y':
+        cutoffDate.setFullYear(now.getFullYear() - 5);
+        break;
+    }
+
+    return data.filter(point => {
+      return point.timestamp >= cutoffDate.getTime();
+    });
+  };
+
+  const calculateGuestModePerformance = () => {
     // Check if all transactions are from the same day
     const isSameDay = (dates: Date[]) => {
-      if (dates.length <= 1) return true;
+      if (dates.length <= 1) return false;
       const firstDay = dates[0].toDateString();
       return dates.every(d => d.toDateString() === firstDay);
     };
 
-    // Format date/time based on whether it's same day or not
-    const formatDateTime = (dateStr: string, useTimes: boolean) => {
+    // Format date/time based on time range and data span
+    const formatDateTime = (dateStr: string, useTimes: boolean, allDates: Date[] = []) => {
       const date = new Date(dateStr);
+
       if (useTimes) {
-        // Show time for same-day transactions
+        // Show time for same-day transactions on 1D view
         return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      }
+
+      // Calculate date span to determine format
+      const now = new Date();
+      const oldestDate = allDates.length > 0 ? new Date(Math.min(...allDates.map(d => d.getTime()))) : date;
+      const yearsDiff = (now.getTime() - oldestDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+
+      if (yearsDiff > 3) {
+        // Show just year for 3+ year spans
+        return date.getFullYear().toString();
+      } else if (yearsDiff > 1 || date.getFullYear() !== now.getFullYear()) {
+        // Show "Mon YYYY" for multi-year or different year
+        return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
       } else {
-        // Show date for multi-day
+        // Show "Mon D" for same year
         const month = date.toLocaleDateString('en-US', { month: 'short' });
         const day = date.getDate();
         return `${month} ${day}`;
       }
-    };
-
-    // Filter data based on time range
-    const filterDataByTimeRange = (data: any[], range: typeof timeRange) => {
-      if (range === 'Max' || data.length === 0) return data;
-
-      const now = new Date();
-      const cutoffDate = new Date();
-
-      switch (range) {
-        case '1D':
-          cutoffDate.setDate(now.getDate() - 1);
-          break;
-        case '5D':
-          cutoffDate.setDate(now.getDate() - 5);
-          break;
-        case '1M':
-          cutoffDate.setMonth(now.getMonth() - 1);
-          break;
-        case '6M':
-          cutoffDate.setMonth(now.getMonth() - 6);
-          break;
-        case 'YTD':
-          cutoffDate.setMonth(0);
-          cutoffDate.setDate(1);
-          break;
-        case '1Y':
-          cutoffDate.setFullYear(now.getFullYear() - 1);
-          break;
-        case '5Y':
-          cutoffDate.setFullYear(now.getFullYear() - 5);
-          break;
-      }
-
-      return data.filter(point => {
-        const pointDate = new Date(point.fullDate);
-        return pointDate >= cutoffDate;
-      });
     };
 
     // Calculate portfolio value over time based on transactions
@@ -95,11 +180,13 @@ export default function PortfolioPerformanceChart({
 
       if (transactions.length === 0) {
         // No transactions yet, just show initial balance
+        const now = new Date();
         return {
           data: [
             {
               date: 'Now',
-              fullDate: new Date().toLocaleDateString(),
+              fullDate: now.toLocaleDateString(),
+              timestamp: now.getTime(),
               value: safeInitialBalance,
               displayValue: safeInitialBalance.toFixed(2)
             }
@@ -161,9 +248,11 @@ export default function PortfolioPerformanceChart({
 
         const portfolioValue = runningCash + holdingsValue;
 
+        const txnDate = new Date(txn.timestamp || Date.now());
         dataPoints.push({
           date: formatDateTime(txn.timestamp || '', useTimes),
-          fullDate: new Date(txn.timestamp || Date.now()).toLocaleString(),
+          fullDate: txnDate.toLocaleString(),
+          timestamp: txnDate.getTime(), // Store timestamp for filtering
           value: portfolioValue,
           displayValue: portfolioValue.toFixed(2)
         });
@@ -173,9 +262,11 @@ export default function PortfolioPerformanceChart({
       const currentHoldingsValue = holdings.reduce((sum, h) => sum + (h.currentPrice * h.quantity), 0);
       const currentPortfolioValue = currentBalance + currentHoldingsValue;
 
+      const now = new Date();
       dataPoints.push({
-        date: useTimes ? 'Now' : formatDateTime(new Date().toISOString(), false),
-        fullDate: new Date().toLocaleString(),
+        date: useTimes ? 'Now' : formatDateTime(now.toISOString(), false),
+        fullDate: now.toLocaleString(),
+        timestamp: now.getTime(), // Store timestamp for filtering
         value: currentPortfolioValue,
         displayValue: currentPortfolioValue.toFixed(2)
       });
@@ -186,7 +277,7 @@ export default function PortfolioPerformanceChart({
     const result = calculatePerformance();
     const filteredData = filterDataByTimeRange(result.data, timeRange);
     setChartData(filteredData);
-  }, [initialBalance, currentBalance, holdings, transactions, timeRange]);
+  };
 
   const currentValue = chartData[chartData.length - 1]?.value || initialBalance || 0;
   const totalChange = currentValue - (initialBalance || 0);
@@ -219,7 +310,7 @@ export default function PortfolioPerformanceChart({
       </div>
 
       <div className="flex justify-start space-x-1 mb-4">
-        {(['1D', '5D', '1M', '6M', 'YTD', '1Y', '5Y', 'Max'] as const).map((range) => (
+        {(['5D', '1M', '6M', 'YTD', '1Y', '5Y', 'Max'] as const).map((range) => (
           <button
             key={range}
             onClick={() => setTimeRange(range)}
@@ -237,7 +328,7 @@ export default function PortfolioPerformanceChart({
       {chartData.length > 1 && (
         <div className="h-80 mt-4">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <AreaChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor={isPositive ? "#10b981" : "#ef4444"} stopOpacity={0.3}/>

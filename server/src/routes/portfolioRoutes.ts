@@ -4,7 +4,8 @@ import {
   createPortfolio,
   migrateGuestPortfolio,
   executeTrade,
-  getTransactions
+  getTransactions,
+  getPortfolioPerformance
 } from '../controllers/portfolioController';
 import { authenticateToken } from '../middleware/auth';
 
@@ -16,5 +17,6 @@ router.post('/', authenticateToken, createPortfolio);
 router.post('/migrate', authenticateToken, migrateGuestPortfolio);
 router.post('/trade', authenticateToken, executeTrade);
 router.get('/transactions', authenticateToken, getTransactions);
+router.get('/performance', authenticateToken, getPortfolioPerformance);
 
 export default router;

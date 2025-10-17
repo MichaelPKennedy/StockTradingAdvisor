@@ -2,7 +2,7 @@ import { Response } from 'express';
 import { pool } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
-import alphaVantageService from '../services/alphaVantageService';
+import yahooFinanceService from '../services/yahooFinanceService';
 
 export const getPortfolio = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -170,7 +170,7 @@ export const executeTrade = async (req: AuthRequest, res: Response): Promise<voi
     }
 
     // Get current stock price
-    const quote = await alphaVantageService.getQuote(symbol.toUpperCase());
+    const quote = await yahooFinanceService.getQuote(symbol.toUpperCase());
     const price = quote.price;
 
     // Get user's portfolio
@@ -215,8 +215,10 @@ export const executeTrade = async (req: AuthRequest, res: Response): Promise<voi
         if (existingHoldings.length > 0) {
           // Update existing holding
           const holding = existingHoldings[0];
-          const newQuantity = holding.quantity + quantity;
-          const avgPrice = ((holding.purchase_price * holding.quantity) + (price * quantity)) / newQuantity;
+          const existingQty = parseFloat(holding.quantity);
+          const existingPrice = parseFloat(holding.purchase_price);
+          const newQuantity = existingQty + quantity;
+          const avgPrice = ((existingPrice * existingQty) + (price * quantity)) / newQuantity;
 
           await connection.query(
             'UPDATE holdings SET quantity = ?, purchase_price = ?, current_price = ? WHERE id = ?',
@@ -236,7 +238,10 @@ export const executeTrade = async (req: AuthRequest, res: Response): Promise<voi
           [portfolio.id, symbol.toUpperCase()]
         );
 
-        if (holdings.length === 0 || holdings[0].quantity < quantity) {
+        const holding = holdings[0];
+        const existingQty = parseFloat(holding.quantity);
+
+        if (holdings.length === 0 || existingQty < quantity) {
           await connection.rollback();
           connection.release();
           res.status(400).json({ error: 'Insufficient shares to sell' });
@@ -249,8 +254,7 @@ export const executeTrade = async (req: AuthRequest, res: Response): Promise<voi
           [totalCost, portfolio.id]
         );
 
-        const holding = holdings[0];
-        const newQuantity = holding.quantity - quantity;
+        const newQuantity = existingQty - quantity;
 
         if (newQuantity === 0) {
           // Remove holding
@@ -321,5 +325,148 @@ export const getTransactions = async (req: AuthRequest, res: Response): Promise<
   } catch (error) {
     console.error('Get transactions error:', error);
     res.status(500).json({ error: 'Failed to get transactions' });
+  }
+};
+
+export const getPortfolioPerformance = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    // Get user's portfolio
+    const [portfolios] = await pool.query<RowDataPacket[]>(
+      'SELECT * FROM portfolios WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+      [req.userId]
+    );
+
+    if (portfolios.length === 0) {
+      res.status(404).json({ error: 'Portfolio not found' });
+      return;
+    }
+
+    const portfolio = portfolios[0];
+    const portfolioId = portfolio.id;
+
+    // Get all transactions sorted by timestamp
+    const [transactions] = await pool.query<RowDataPacket[]>(
+      'SELECT * FROM transactions WHERE portfolio_id = ? ORDER BY timestamp ASC',
+      [portfolioId]
+    );
+
+    if (transactions.length === 0) {
+      // No transactions, return just the initial balance
+      res.json([{
+        date: new Date().toISOString().split('T')[0],
+        value: parseFloat(portfolio.initial_balance)
+      }]);
+      return;
+    }
+
+    // Get unique symbols from transactions
+    const symbols = Array.from(new Set(transactions.map((t: any) => t.symbol)));
+
+    // Get date range from first transaction to now
+    const firstTransaction = new Date(transactions[0].timestamp);
+    const now = new Date();
+
+    // Fetch historical data for all symbols
+    const historicalDataMap = await yahooFinanceService.getBulkHistoricalData(
+      symbols,
+      firstTransaction,
+      now,
+      '1d'
+    );
+
+    // Build a map of dates to portfolio values
+    const dateValueMap = new Map<string, number>();
+
+    // Get all unique dates from historical data
+    const allDates = new Set<string>();
+    historicalDataMap.forEach((data) => {
+      data.forEach((point) => allDates.add(point.date));
+    });
+
+    // Sort dates
+    const sortedDates = Array.from(allDates).sort();
+
+    // For each date, calculate portfolio value
+    for (const date of sortedDates) {
+      const dateObj = new Date(date);
+
+      // Start with initial balance
+      let cash = parseFloat(portfolio.initial_balance);
+      const holdings = new Map<string, { quantity: number; avgPrice: number }>();
+
+      // Replay transactions up to this date
+      for (const txn of transactions) {
+        const txnDate = new Date(txn.timestamp);
+        if (txnDate > dateObj) break;
+
+        const symbol = txn.symbol;
+        const quantity = parseFloat(txn.quantity);
+        const price = parseFloat(txn.price);
+
+        if (txn.type === 'buy') {
+          cash -= price * quantity;
+
+          const existing = holdings.get(symbol);
+          if (existing) {
+            const newQuantity = existing.quantity + quantity;
+            const newAvgPrice = ((existing.avgPrice * existing.quantity) + (price * quantity)) / newQuantity;
+            holdings.set(symbol, { quantity: newQuantity, avgPrice: newAvgPrice });
+          } else {
+            holdings.set(symbol, { quantity, avgPrice: price });
+          }
+        } else {
+          cash += price * quantity;
+
+          const existing = holdings.get(symbol);
+          if (existing) {
+            const newQuantity = existing.quantity - quantity;
+            if (newQuantity <= 0) {
+              holdings.delete(symbol);
+            } else {
+              holdings.set(symbol, { ...existing, quantity: newQuantity });
+            }
+          }
+        }
+      }
+
+      // Calculate holdings value at this date
+      let holdingsValue = 0;
+      for (const [symbol, holding] of holdings.entries()) {
+        const historicalData = historicalDataMap.get(symbol);
+        if (historicalData) {
+          // Find the price for this date (or closest before)
+          const priceData = historicalData.find(p => p.date === date);
+          if (priceData) {
+            holdingsValue += holding.quantity * priceData.close;
+          } else {
+            // Use the closest previous date
+            const previousData = historicalData
+              .filter(p => p.date <= date)
+              .sort((a, b) => b.date.localeCompare(a.date))[0];
+            if (previousData) {
+              holdingsValue += holding.quantity * previousData.close;
+            }
+          }
+        }
+      }
+
+      const totalValue = cash + holdingsValue;
+      dateValueMap.set(date, totalValue);
+    }
+
+    // Convert to array format
+    const performanceData = Array.from(dateValueMap.entries())
+      .map(([date, value]) => ({ date, value }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    res.json(performanceData);
+  } catch (error) {
+    console.error('Get portfolio performance error:', error);
+    res.status(500).json({ error: 'Failed to get portfolio performance' });
   }
 };

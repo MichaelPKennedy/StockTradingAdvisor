@@ -35,9 +35,9 @@ interface PortfolioContextType {
   transactions: Transaction[];
   loading: boolean;
   isGuestMode: boolean;
-  createPortfolio: (name: string, initialBalance: number) => Promise<void>;
+  createPortfolio: (name: string, initialBalance: number) => Promise<Portfolio>;
   executeTrade: (symbol: string, quantity: number, type: 'buy' | 'sell') => Promise<void>;
-  batchExecuteTrades: (trades: Array<{ symbol: string; quantity: number; type: 'buy' | 'sell' }>) => Promise<void>;
+  batchExecuteTrades: (trades: Array<{ symbol: string; quantity: number; type: 'buy' | 'sell' }>, portfolioOverride?: Portfolio) => Promise<void>;
   migrateToAccount: () => Promise<void>;
   refreshPortfolio: () => Promise<void>;
 }
@@ -53,18 +53,22 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // Start with true to prevent flashing
+  const [isMigrating, setIsMigrating] = useState(false);
 
   const isGuestMode = !isAuthenticated && portfolio !== null;
 
-  // Load portfolio on auth change
+  // Load portfolio on auth change (skip if migrating)
   useEffect(() => {
+    if (isMigrating) return;
+
     if (isAuthenticated && token) {
       loadAuthenticatedPortfolio();
     } else {
       loadGuestPortfolio();
+      setLoading(false); // Guest data loads synchronously from localStorage
     }
-  }, [isAuthenticated, token]);
+  }, [isAuthenticated, token, isMigrating]);
 
   const loadAuthenticatedPortfolio = async () => {
     if (!token) return;
@@ -72,13 +76,53 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       const data = await api.getPortfolio(token);
-      setPortfolio(data.portfolio);
-      setHoldings(data.holdings);
+
+      // Parse numeric strings from database and enrich with current quotes
+      const enrichedHoldings: Holding[] = await Promise.all(
+        data.holdings.map(async (h: any) => {
+          try {
+            const quote = await api.getQuote(h.symbol);
+            return {
+              ...h,
+              quantity: parseFloat(h.quantity),
+              purchasePrice: parseFloat(h.purchase_price),
+              currentPrice: quote.price,
+              changePercent: quote.changePercent || 0,
+            };
+          } catch (error) {
+            console.error(`Failed to fetch quote for ${h.symbol}:`, error);
+            // Fallback to database values if quote fetch fails
+            return {
+              ...h,
+              quantity: parseFloat(h.quantity),
+              purchasePrice: parseFloat(h.purchase_price),
+              currentPrice: parseFloat(h.current_price),
+              changePercent: 0,
+            };
+          }
+        })
+      );
+
+      // Parse portfolio numeric values
+      const enrichedPortfolio = {
+        ...data.portfolio,
+        initialBalance: parseFloat(data.portfolio.initial_balance),
+        currentBalance: parseFloat(data.portfolio.current_balance),
+      };
+
+      setPortfolio(enrichedPortfolio);
+      setHoldings(enrichedHoldings);
 
       const txns = await api.getTransactions(token);
       setTransactions(txns);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to load portfolio:', error);
+      // If portfolio not found (404), that's ok - user hasn't created one yet
+      if (error?.message?.includes('Portfolio not found') || error?.response?.status === 404) {
+        setPortfolio(null);
+        setHoldings([]);
+        setTransactions([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -106,16 +150,18 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(GUEST_TRANSACTIONS_KEY, JSON.stringify(t));
   };
 
-  const createPortfolio = async (name: string, initialBalance: number) => {
+  const createPortfolio = async (name: string, initialBalance: number): Promise<Portfolio> => {
+    let newPortfolio: Portfolio;
+
     if (isAuthenticated && token) {
       // Create authenticated portfolio
-      const newPortfolio = await api.createPortfolio({ name, initialBalance }, token);
+      newPortfolio = await api.createPortfolio({ name, initialBalance }, token);
       setPortfolio(newPortfolio);
       setHoldings([]);
       setTransactions([]);
     } else {
       // Create guest portfolio
-      const newPortfolio: Portfolio = {
+      newPortfolio = {
         name,
         initialBalance,
         currentBalance: initialBalance,
@@ -125,6 +171,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       setTransactions([]);
       saveGuestPortfolio(newPortfolio, [], []);
     }
+
+    return newPortfolio;
   };
 
   const executeTrade = async (symbol: string, quantity: number, type: 'buy' | 'sell') => {
@@ -200,8 +248,11 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const batchExecuteTrades = async (trades: Array<{ symbol: string; quantity: number; type: 'buy' | 'sell' }>) => {
-    if (!portfolio) throw new Error('No portfolio found');
+  const batchExecuteTrades = async (trades: Array<{ symbol: string; quantity: number; type: 'buy' | 'sell' }>, portfolioOverride?: Portfolio) => {
+    // Use the override portfolio if provided (for newly created portfolios), otherwise use state
+    const currentPortfolio = portfolioOverride || portfolio;
+
+    if (!currentPortfolio) throw new Error('No portfolio found');
 
     if (isAuthenticated && token) {
       // Execute authenticated trades sequentially
@@ -216,8 +267,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       await refreshPortfolio();
     } else {
       // Execute all guest trades in a single state update
-      let updatedPortfolio = { ...portfolio };
-      let updatedHoldings = [...holdings];
+      let updatedPortfolio = { ...currentPortfolio };
+      let updatedHoldings = portfolioOverride ? [] : [...holdings];
       const newTransactions: Transaction[] = [];
 
       // Process all trades
@@ -298,37 +349,42 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const migrateToAccount = async () => {
     if (!token || !portfolio) return;
 
-    const data = {
-      portfolio: {
-        name: portfolio.name,
-        initialBalance: portfolio.initialBalance,
-        currentBalance: portfolio.currentBalance,
-      },
-      holdings: holdings.map(h => ({
-        symbol: h.symbol,
-        quantity: h.quantity,
-        purchasePrice: h.purchasePrice,
-        currentPrice: h.currentPrice,
-        purchaseDate: h.purchaseDate,
-      })),
-      transactions: transactions.map(t => ({
-        type: t.type,
-        symbol: t.symbol,
-        quantity: t.quantity,
-        price: t.price,
-        timestamp: t.timestamp,
-      })),
-    };
+    setIsMigrating(true);
+    try {
+      const data = {
+        portfolio: {
+          name: portfolio.name,
+          initialBalance: portfolio.initialBalance,
+          currentBalance: portfolio.currentBalance,
+        },
+        holdings: holdings.map(h => ({
+          symbol: h.symbol,
+          quantity: h.quantity,
+          purchasePrice: h.purchasePrice,
+          currentPrice: h.currentPrice,
+          purchaseDate: h.purchaseDate,
+        })),
+        transactions: transactions.map(t => ({
+          type: t.type,
+          symbol: t.symbol,
+          quantity: t.quantity,
+          price: t.price,
+          timestamp: t.timestamp,
+        })),
+      };
 
-    await api.migratePortfolio(data, token);
+      await api.migratePortfolio(data, token);
 
-    // Clear guest data
-    localStorage.removeItem(GUEST_PORTFOLIO_KEY);
-    localStorage.removeItem(GUEST_HOLDINGS_KEY);
-    localStorage.removeItem(GUEST_TRANSACTIONS_KEY);
+      // Clear guest data
+      localStorage.removeItem(GUEST_PORTFOLIO_KEY);
+      localStorage.removeItem(GUEST_HOLDINGS_KEY);
+      localStorage.removeItem(GUEST_TRANSACTIONS_KEY);
 
-    // Reload authenticated portfolio
-    await loadAuthenticatedPortfolio();
+      // Reload authenticated portfolio
+      await loadAuthenticatedPortfolio();
+    } finally {
+      setIsMigrating(false);
+    }
   };
 
   const refreshPortfolio = async () => {

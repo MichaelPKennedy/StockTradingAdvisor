@@ -40,9 +40,6 @@ export default function Home() {
       // Extract budget from suggestions or use default
       const budget = parseFloat(suggestions.budget || '100000');
 
-      // Create portfolio for both guests and authenticated users
-      await createPortfolio('AI Recommended Portfolio', budget);
-
       // Prepare trades only for selected stocks
       if (suggestions.stocks && Array.isArray(suggestions.stocks)) {
         const selectedStocksList = suggestions.stocks.filter((stock: any) =>
@@ -83,9 +80,12 @@ export default function Home() {
           }
         }
 
-        // Execute all trades in a single batch
+        // Create portfolio FIRST and get the created portfolio object
+        const newPortfolio = await createPortfolio('AI Recommended Portfolio', budget);
+
+        // Execute all trades in a single batch, passing the newly created portfolio
         if (trades.length > 0) {
-          await batchExecuteTrades(trades);
+          await batchExecuteTrades(trades, newPortfolio);
           setToast({
             message: `Portfolio created with ${trades.length} stock${trades.length > 1 ? 's' : ''}!`,
             type: 'success',
@@ -98,6 +98,9 @@ export default function Home() {
             type: 'info',
           });
         }
+      } else {
+        // No stocks selected, just create empty portfolio
+        await createPortfolio('AI Recommended Portfolio', budget);
       }
 
       // Navigate to dashboard after a brief delay to show toast

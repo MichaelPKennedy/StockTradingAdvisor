@@ -58,12 +58,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(response.user);
     setToken(response.token);
     localStorage.setItem('token', response.token);
+    // Note: Guest portfolio migration is handled by the PortfolioContext
   };
 
   const logout = () => {
     setUser(null);
     setToken(null);
     localStorage.removeItem('token');
+    // Clear guest portfolio data on logout
+    localStorage.removeItem('guestPortfolio');
+    localStorage.removeItem('guestHoldings');
+    localStorage.removeItem('guestTransactions');
   };
 
   return (
